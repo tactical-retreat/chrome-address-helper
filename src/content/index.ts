@@ -306,9 +306,11 @@ function createAddressElement(address: string, displayText: string): HTMLElement
 let controlPanel: HTMLElement | null = null;
 let controlPanelBridge: HTMLElement | null = null;
 let hideTimeout: number | null = null;
+let showTimeout: number | null = null;
 let currentPanelAddress: string | null = null;
+let pendingShowAddress: string | null = null;
 
-async function showControlPanel(event: MouseEvent, address: string) {
+function showControlPanel(event: MouseEvent, address: string) {
   // If we're already showing this address's panel, just cancel any hide
   if (currentPanelAddress === address && controlPanel) {
     if (hideTimeout) {
@@ -323,6 +325,24 @@ async function showControlPanel(event: MouseEvent, address: string) {
     hideTimeout = null;
   }
 
+  // Cancel any pending show
+  if (showTimeout) {
+    clearTimeout(showTimeout);
+    showTimeout = null;
+  }
+
+  // Store event data for delayed show
+  const targetElement = event.target as HTMLElement;
+  pendingShowAddress = address;
+
+  // Delay before showing popup (300ms)
+  showTimeout = window.setTimeout(() => {
+    if (pendingShowAddress !== address) return; // Address changed, abort
+    showControlPanelNow(targetElement, address);
+  }, 300);
+}
+
+async function showControlPanelNow(target: HTMLElement, address: string) {
   // Get tags for this address
   const response = await chrome.runtime.sendMessage({ type: 'GET_TAGS', address });
   const tags: Tag[] = response?.tags || [];
@@ -342,7 +362,6 @@ async function showControlPanel(event: MouseEvent, address: string) {
   controlPanel.className = 'wt-control-panel';
 
   // Position near the element
-  const target = event.target as HTMLElement;
   const rect = target.getBoundingClientRect();
   controlPanel.style.position = 'fixed';
   controlPanel.style.left = `${rect.left - 10}px`;
@@ -470,7 +489,7 @@ function hideControlPanelDelayed() {
       controlPanelBridge = null;
     }
     currentPanelAddress = null;
-  }, 500);  // Longer delay to allow moving to panel
+  }, 500);  // Delay to allow moving to panel
 }
 
 function createCopyButton(text: string, title: string): HTMLElement {
@@ -658,34 +677,230 @@ document.addEventListener('click', (e) => {
 });
 
 function handleDexscreenerAddresses() {
-  // Find Dexscreener address links (they link to snowscan/snowtrace/etherscan etc)
-  const addressLinks = document.querySelectorAll<HTMLAnchorElement>('a[href*="/address/0x"]:not(.wt-dex-processed)');
+  // Handle all Dexscreener table types
+  handleDexTransactionsTable();
+  handleDexGridTables();
+}
 
-  for (const link of addressLinks) {
-    link.classList.add('wt-dex-processed');
+// Cache grid templates per table type
+const dexGridTemplates: Map<string, string> = new Map();
 
-    // Extract address from href
-    const href = link.getAttribute('href') || '';
-    const match = href.match(/0x[a-fA-F0-9]{40}/i);
-    if (!match) continue;
-
-    const address = normalizeAddress(match[0]);
-
-    // Add hover listeners for control panel
-    link.addEventListener('mouseenter', (e) => showControlPanel(e as MouseEvent, address));
-    link.addEventListener('mouseleave', hideControlPanelDelayed);
-
-    // Check if we have a tag for this address
-    const tagData = tagCache.get(address);
-    if (tagData) {
-      // Replace the short code with our tag name
-      const originalText = link.textContent || '';
-      link.setAttribute('data-original-text', originalText);
-      link.textContent = tagData.name;
-      link.style.cssText += 'color: #4ade80 !important; font-weight: 500;';
-      link.title = `${tagData.name} (${address.slice(0, 6)}...${address.slice(-4)})`;
+/**
+ * Find a header row by looking for specific column names
+ */
+function findHeaderByColumns(columnNames: string[]): HTMLElement | null {
+  // Check table headers (Transactions tab)
+  const tableHeaders = document.querySelectorAll('tr');
+  for (const tr of tableHeaders) {
+    const ths = tr.querySelectorAll('th');
+    if (ths.length >= columnNames.length) {
+      const texts = Array.from(ths).map(th => th.textContent?.trim().toLowerCase() || '');
+      if (columnNames.every(col => texts.some(t => t.includes(col.toLowerCase())))) {
+        return tr as HTMLElement;
+      }
     }
   }
+
+  // Check div-based grids (Top Traders, Holders, LP tabs)
+  const divs = document.querySelectorAll('div');
+  for (const div of divs) {
+    const style = getComputedStyle(div);
+    if (style.display === 'grid' && div.children.length >= columnNames.length) {
+      const texts = Array.from(div.children).map(c => c.textContent?.trim().toLowerCase() || '');
+      if (columnNames.every(col => texts.some(t => t.includes(col.toLowerCase())))) {
+        return div as HTMLElement;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Handle Transactions table (uses <table> with <tr>/<th>/<td>)
+ */
+function handleDexTransactionsTable() {
+  // Find Transactions header by column names
+  const headerTr = findHeaderByColumns(['date', 'type', 'maker', 'txn']) as HTMLTableRowElement;
+  if (!headerTr) return;
+
+  const ths = headerTr.querySelectorAll('th');
+  if (ths.length < 8) return;
+
+  // Add TAG header at the end if not already present
+  if (!headerTr.classList.contains('wt-tag-col-added')) {
+    // Get current grid and modify it - add TAG column at end
+    const currentGrid = getComputedStyle(headerTr).gridTemplateColumns;
+    const cols = currentGrid.split(/\s+/);
+
+    // Shrink some columns to make room for TAG (70px)
+    // Columns 2,3,4 are typically USD, ARENA, WAVAX - shrink by ~23px each
+    for (const idx of [2, 3, 4]) {
+      const val = parseFloat(cols[idx]);
+      if (!isNaN(val) && val > 100) {
+        cols[idx] = (val - 23) + 'px';
+      }
+    }
+
+    cols.push('70px');
+    const newGrid = cols.join(' ');
+    dexGridTemplates.set('transactions', newGrid);
+    headerTr.style.gridTemplateColumns = newGrid;
+
+    // Add TAG header at the end
+    const tagTh = document.createElement('th');
+    tagTh.style.cssText = 'display: flex; align-items: center; justify-content: flex-start; padding: 0 4px;';
+    tagTh.innerHTML = '<span style="color: #4ade80; font-size: 11px; font-weight: 600;">TAG</span>';
+    headerTr.appendChild(tagTh);
+
+    headerTr.classList.add('wt-tag-col-added');
+  }
+
+  // Always process new unprocessed data rows
+  const addressLinks = document.querySelectorAll<HTMLAnchorElement>('td a[href*="/address/0x"]:not(.wt-dex-processed)');
+  for (const link of addressLinks) {
+    processTransactionRow(link);
+  }
+}
+
+function processTransactionRow(link: HTMLAnchorElement) {
+  link.classList.add('wt-dex-processed');
+
+  const href = link.getAttribute('href') || '';
+  const match = href.match(/0x[a-fA-F0-9]{40}/i);
+  if (!match) return;
+
+  const address = normalizeAddress(match[0]);
+  const td = link.closest('td') as HTMLTableCellElement;
+  if (!td || td.classList.contains('wt-tag-col-added')) return;
+
+  // Apply grid template
+  const gridTemplate = dexGridTemplates.get('transactions');
+  if (gridTemplate) {
+    td.style.gridTemplateColumns = gridTemplate;
+  }
+
+  // Create and append tag cell at the end
+  const tagData = tagCache.get(address);
+  const tagCell = createTagCell(address, tagData?.name);
+  td.appendChild(tagCell);
+  td.classList.add('wt-tag-col-added');
+}
+
+/**
+ * Handle div-based grid tables (Top Traders, Holders, Liquidity Providers)
+ */
+function handleDexGridTables() {
+  // Define table types by their column signatures
+  const tableTypes = [
+    { name: 'toptraders', columns: ['rank', 'maker', 'bought', 'sold'] },
+    { name: 'holders', columns: ['rank', 'address', '%', 'amount', 'value'] },
+    { name: 'lp', columns: ['rank', 'address', '%', 'amount', 'txns'] },
+  ];
+
+  for (const tableType of tableTypes) {
+    const header = findHeaderByColumns(tableType.columns);
+    if (!header) continue;
+    if (header.tagName === 'TR') continue; // Skip table rows, handled separately
+
+    processGridTable(header, tableType.name);
+  }
+}
+
+function processGridTable(header: HTMLElement, tableName: string) {
+  const headerChildren = Array.from(header.children);
+
+  // Add TAG header at the end if not already present
+  if (!header.classList.contains('wt-tag-col-added')) {
+    // Modify grid template - add TAG column at the end
+    const currentGrid = getComputedStyle(header).gridTemplateColumns;
+    const cols = currentGrid.split(/\s+/);
+
+    // Shrink larger columns to make room for TAG (70px)
+    // Find columns > 150px and shrink them proportionally
+    let totalToShrink = 70;
+    const shrinkableIdxs = cols.map((col, i) => ({ i, val: parseFloat(col) }))
+      .filter(c => !isNaN(c.val) && c.val > 150)
+      .map(c => c.i);
+
+    if (shrinkableIdxs.length > 0) {
+      const shrinkPer = totalToShrink / shrinkableIdxs.length;
+      for (const idx of shrinkableIdxs) {
+        const val = parseFloat(cols[idx]);
+        cols[idx] = (val - shrinkPer) + 'px';
+      }
+    }
+
+    cols.push('70px');
+    const newGrid = cols.join(' ');
+    dexGridTemplates.set(tableName, newGrid);
+    header.style.gridTemplateColumns = newGrid;
+
+    // Add TAG header at the end
+    const tagHeader = document.createElement('div');
+    tagHeader.style.cssText = 'display: flex; align-items: center; padding: 0 4px;';
+    tagHeader.innerHTML = '<span style="color: #4ade80; font-size: 11px; font-weight: 600;">TAG</span>';
+    header.appendChild(tagHeader);
+
+    header.classList.add('wt-tag-col-added');
+  }
+
+  // Find and process data rows (siblings with same grid structure)
+  const container = header.parentElement;
+  if (!container) return;
+
+  const rows = Array.from(container.children).filter(row => {
+    if (row === header || row.classList.contains('wt-tag-col-added')) return false;
+    const style = getComputedStyle(row);
+    return style.display === 'grid' && row.children.length >= headerChildren.length - 1; // -1 because header now has TAG
+  });
+
+  for (const row of rows) {
+    processGridRow(row as HTMLElement, tableName);
+  }
+}
+
+function processGridRow(row: HTMLElement, tableName: string) {
+  if (row.classList.contains('wt-tag-col-added')) return;
+
+  // Find address in this row - look for explorer link
+  const explorerLink = row.querySelector('a[href*="/address/0x"]') as HTMLAnchorElement;
+  if (!explorerLink) return;
+
+  const href = explorerLink.getAttribute('href') || '';
+  const match = href.match(/0x[a-fA-F0-9]{40}/i);
+  if (!match) return;
+
+  const address = normalizeAddress(match[0]);
+
+  // Apply grid template
+  const gridTemplate = dexGridTemplates.get(tableName);
+  if (gridTemplate) {
+    row.style.gridTemplateColumns = gridTemplate;
+  }
+
+  // Create and append tag cell at the end
+  const tagData = tagCache.get(address);
+  const tagCell = createTagCell(address, tagData?.name);
+  row.appendChild(tagCell);
+
+  row.classList.add('wt-tag-col-added');
+}
+
+function createTagCell(address: string, tagName: string | undefined): HTMLElement {
+  const tagCell = document.createElement('div');
+  tagCell.className = 'wt-tag-cell';
+  tagCell.style.cssText = 'display: flex; align-items: center; padding: 0 4px; min-width: 0; overflow: hidden; cursor: pointer;';
+
+  if (tagName) {
+    tagCell.innerHTML = `<span style="color: #4ade80; font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${tagName}">${tagName}</span>`;
+  }
+
+  // Add hover listeners for control panel
+  tagCell.addEventListener('mouseenter', (e) => showControlPanel(e as MouseEvent, address));
+  tagCell.addEventListener('mouseleave', hideControlPanelDelayed);
+
+  return tagCell;
 }
 
 function addArkhamImportButton() {

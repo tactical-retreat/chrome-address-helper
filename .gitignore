@@ -23,3 +23,5 @@ src/data/*.csv
 # Screenshots
 *.png
 !src/icons/*.png
+junk
+.claude
