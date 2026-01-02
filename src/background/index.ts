@@ -167,8 +167,20 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       return { count };
     }
 
+    case 'IMPORT_SNOWSCAN_TAGS': {
+      const count = await importTags(message.tags, 'snowscan');
+      notifyAllTabs('TAGS_UPDATED');
+      return { count };
+    }
+
     case 'EXPORT_ARKHAM_TAGS': {
       const tags = await getTagsBySource('arkham');
+      const csv = tagsToCSV(tags);
+      return { csv, count: tags.length };
+    }
+
+    case 'EXPORT_SNOWSCAN_TAGS': {
+      const tags = await getTagsBySource('snowscan');
       const csv = tagsToCSV(tags);
       return { csv, count: tags.length };
     }
