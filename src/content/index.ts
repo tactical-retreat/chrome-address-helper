@@ -560,6 +560,13 @@ function handleSpecialPages() {
     }
   }
 
+  if (hostname === 'snowscan.xyz') {
+    // Show import button only on mynotes_address page
+    if (window.location.pathname === '/mynotes_address') {
+      handleSnowscanNotesPage();
+    }
+  }
+
   if (hostname === 'dexscreener.com') {
     // Handle Dexscreener address links
     setTimeout(handleDexscreenerAddresses, 1000);
@@ -1031,6 +1038,291 @@ async function fetchArkhamLabels(): Promise<Tag[]> {
 
   console.log(`[WalletTagger] Total unique addresses: ${tags.length}`);
   return tags;
+}
+
+function handleSnowscanNotesPage() {
+  console.log('[WalletTagger] Detected SnowScan notes page');
+  setTimeout(addSnowscanImportButton, 2000);
+}
+
+function addSnowscanImportButton() {
+  // Check if button already exists
+  if (document.getElementById('wt-snowscan-import')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'wt-snowscan-import';
+  btn.className = 'wt-arkham-import-btn';
+  btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+  btn.addEventListener('click', importSnowscanNotes);
+
+  // Add to page - try to find a good position
+  const container = document.querySelector('main') || document.body;
+  btn.style.position = 'fixed';
+  btn.style.bottom = '20px';
+  btn.style.right = '20px';
+  btn.style.zIndex = '999999';
+  container.appendChild(btn);
+}
+
+async function importSnowscanNotes() {
+  const btn = document.getElementById('wt-snowscan-import') as HTMLButtonElement;
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Importing...';
+
+  try {
+    // Scrape notes from SnowScan page (with pagination)
+    const tags = await fetchSnowscanNotes();
+
+    console.log(`[WalletTagger] Scraped ${tags.length} tags, now sending to background...`);
+
+    if (tags.length === 0) {
+      btn.textContent = '❌ No notes found';
+      setTimeout(() => {
+        btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+        btn.disabled = false;
+      }, 2000);
+      return;
+    }
+
+    // Send to background for storage
+    console.log('[WalletTagger] Sending IMPORT_SNOWSCAN_TAGS message...');
+    const response = await chrome.runtime.sendMessage({
+      type: 'IMPORT_SNOWSCAN_TAGS',
+      tags,
+    });
+
+    console.log('[WalletTagger] Got response from background:', response);
+
+    if (response && response.count !== undefined) {
+      btn.textContent = `✓ Imported ${response.count} notes`;
+      console.log(`[WalletTagger] Successfully imported ${response.count} notes`);
+      
+      // Automatically export CSV for bundling/sharing
+      btn.textContent = `✓ Imported ${response.count} notes, exporting CSV...`;
+      await exportSnowscanToCSV(response.count);
+      btn.textContent = `✓ Imported ${response.count} notes (CSV exported)`;
+    } else {
+      console.error('[WalletTagger] Invalid response from background:', response);
+      throw new Error('Invalid response from background script');
+    }
+
+    setTimeout(() => {
+      btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+      btn.disabled = false;
+    }, 3000);
+  } catch (error) {
+    console.error('[WalletTagger] SnowScan import failed:', error);
+    btn.textContent = '❌ Import failed';
+    setTimeout(() => {
+      btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+      btn.disabled = false;
+    }, 2000);
+  }
+}
+
+async function exportSnowscanToCSV(count: number): Promise<void> {
+  try {
+    // Get SnowScan tags from background as CSV
+    const response = await chrome.runtime.sendMessage({
+      type: 'EXPORT_SNOWSCAN_TAGS',
+    });
+
+    if (!response || !response.csv) {
+      console.error('[WalletTagger] Failed to export CSV');
+      return;
+    }
+
+    // Create download link
+    const blob = new Blob([response.csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'wt_snowscan_export_tags.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    console.log(`[WalletTagger] Exported ${count} SnowScan tags to wt_snowscan_export_tags.csv`);
+    console.log('[WalletTagger] To bundle with extension: Move the downloaded CSV to src/data/ and rebuild');
+  } catch (error) {
+    console.error('[WalletTagger] CSV export failed:', error);
+  }
+}
+
+async function fetchSnowscanNotes(): Promise<Tag[]> {
+  const tags: Tag[] = [];
+  const addressRegex = /0x[a-fA-F0-9]{40}/i;
+  
+  let currentPage = 1;
+  let hasMorePages = true;
+
+  console.log('[WalletTagger] Starting SnowScan notes scraping...');
+
+  try {
+    while (hasMorePages) {
+      console.log(`[WalletTagger] Fetching page ${currentPage}...`);
+      
+      // Fetch the page
+      const url = currentPage === 1 
+        ? 'https://snowscan.xyz/mynotes_address'
+        : `https://snowscan.xyz/mynotes_address?p=${currentPage}`;
+      
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        console.error(`[WalletTagger] Failed to fetch page ${currentPage}: ${response.status}`);
+        break;
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      // Look for the table containing address notes
+      // SnowScan uses a card with a table inside
+      const rows = doc.querySelectorAll('table tbody tr');
+      
+      console.log(`[WalletTagger] Found ${rows.length} rows on page ${currentPage}`);
+      
+      if (rows.length === 0) {
+        console.log('[WalletTagger] No rows found on this page');
+        hasMorePages = false;
+        break;
+      }
+
+      let pageCount = 0;
+      for (const row of rows) {
+        try {
+          // Look for address links in the row
+          const addressLink = row.querySelector('a[href*="/address/0x"]');
+          if (!addressLink) {
+            console.log('[WalletTagger] Row has no address link, skipping');
+            continue;
+          }
+
+          const href = addressLink.getAttribute('href') || '';
+          const addressMatch = href.match(addressRegex);
+          if (!addressMatch) {
+            console.log('[WalletTagger] Could not extract address from href:', href);
+            continue;
+          }
+
+          const address = normalizeAddress(addressMatch[0]);
+
+          // Look for the name tag in the same row
+          // The structure varies, but the name tag is usually in a cell before or after the address
+          const cells = Array.from(row.querySelectorAll('td'));
+          let nameTag = '';
+
+          // Strategy 1: Look for a cell with data-toggle="tooltip" or title attribute (common in Etherscan/SnowScan)
+          for (const cell of cells) {
+            const title = cell.getAttribute('title') || cell.getAttribute('data-original-title');
+            if (title && title.length > 0 && title.length < 100 && !title.match(/^0x/)) {
+              nameTag = title;
+              break;
+            }
+          }
+
+          // Strategy 2: If no title found, look at cell text content
+          if (!nameTag) {
+            for (let i = 0; i < cells.length; i++) {
+              const cell = cells[i];
+              const cellText = cell.textContent?.trim() || '';
+              
+              // Skip empty cells, address cells, and cells with only whitespace/symbols
+              if (!cellText || cellText.match(/^0x[a-fA-F0-9]/i) || cellText.match(/^[\s.…—-]*$/)) {
+                continue;
+              }
+              
+              // Skip cells that are clearly action buttons or UI elements
+              if (cellText.match(/^(edit|delete|view|copy|close|save|cancel)$/i)) {
+                continue;
+              }
+
+              // Skip cells with just icons or very short meaningless text
+              if (cellText.length < 2) {
+                continue;
+              }
+
+              // This cell likely contains the name tag
+              // Take only the first line if there are multiple lines
+              nameTag = cellText.split('\n')[0].trim();
+              if (nameTag.length > 0 && nameTag.length < 100) {
+                console.log(`[WalletTagger] Found name tag in cell ${i}: "${nameTag}" for ${address.slice(0, 10)}...`);
+                break;
+              }
+            }
+          }
+
+          if (nameTag) {
+            tags.push({
+              address,
+              name: nameTag,
+              source: 'snowscan',
+            });
+            pageCount++;
+          } else {
+            console.log(`[WalletTagger] No name tag found for address ${address.slice(0, 10)}...`);
+          }
+        } catch (rowError) {
+          console.error('[WalletTagger] Error processing row:', rowError);
+        }
+      }
+
+      console.log(`[WalletTagger] Extracted ${pageCount} addresses with tags from page ${currentPage}`);
+
+      // Check if there's a next page
+      // Look for pagination controls
+      const paginationLinks = doc.querySelectorAll('.pagination a, a.page-link');
+      
+      console.log(`[WalletTagger] Found ${paginationLinks.length} pagination links`);
+      
+      // Check if we can find a "Next" button or a higher page number
+      let foundNextPage = false;
+      for (const link of paginationLinks) {
+        const linkText = link.textContent?.trim() || '';
+        const linkHref = link.getAttribute('href') || '';
+        
+        if (linkText.toLowerCase().includes('next') || linkHref.includes(`p=${currentPage + 1}`)) {
+          foundNextPage = true;
+          console.log(`[WalletTagger] Found next page link: ${linkText} / ${linkHref}`);
+          break;
+        }
+      }
+
+      // Only continue if we found items on this page AND there's a next page
+      if (foundNextPage && pageCount > 0) {
+        currentPage++;
+        // Add a small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } else {
+        console.log(`[WalletTagger] No more pages (foundNextPage: ${foundNextPage}, pageCount: ${pageCount})`);
+        hasMorePages = false;
+      }
+
+      // Safety limit to avoid infinite loops
+      if (currentPage > 100) {
+        console.log('[WalletTagger] Reached page limit (100)');
+        hasMorePages = false;
+      }
+    }
+
+    console.log(`[WalletTagger] Total SnowScan addresses scraped: ${tags.length}`);
+
+    if (tags.length === 0) {
+      throw new Error('No address notes found. Make sure you are logged in to SnowScan and have created private name tags.');
+    }
+
+    return tags;
+  } catch (error) {
+    console.error('[WalletTagger] Error in fetchSnowscanNotes:', error);
+    throw error;
+  }
 }
 
 // Listen for messages from background
