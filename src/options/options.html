@@ -103,6 +103,7 @@
     .source-actions {
       display: flex;
       gap: 8px;
+      align-items: center;
     }
 
     .btn {
@@ -130,6 +131,23 @@
 
     .btn-danger:hover {
       background: #8a4a4a;
+    }
+
+    .remove-source-btn {
+      font-size: 12px;
+      padding: 4px 8px;
+      min-width: auto;
+    }
+
+    .edit-source-btn {
+      font-size: 12px;
+      padding: 4px 8px;
+      min-width: auto;
+      background: #4a4a8a;
+    }
+
+    .edit-source-btn:hover {
+      background: #5a5a9a;
     }
 
     .form-group {
@@ -259,10 +277,10 @@
       <h2>📥 Import Tags</h2>
 
       <div class="form-group">
-        <label>Upload CSV File</label>
+        <label>Upload CSV or ZIP File</label>
         <div class="file-input-wrapper">
           <button class="btn btn-primary">Choose File...</button>
-          <input type="file" id="csvFileInput" accept=".csv">
+          <input type="file" id="csvFileInput" accept=".csv,.zip">
         </div>
         <span id="fileName" style="margin-left: 12px; color: #6a6a8a;"></span>
       </div>
@@ -276,7 +294,7 @@
       </div>
 
       <p style="color: #6a6a8a; font-size: 12px; margin-top: 12px;">
-        CSV format: address,name (with header row)
+        CSV format: address,name (with header row). ZIP files should contain CSV files.
       </p>
     </div>
 
@@ -310,7 +328,7 @@
       <div class="export-section">
         <button class="btn" id="exportArkhamBtn">Export Arkham Tags</button>
         <button class="btn" id="exportSnowscanBtn">Export SnowScan Tags</button>
-        <button class="btn" id="exportAllBtn">Export All Tags</button>
+        <button class="btn" id="exportAllBtn">Export All Tags (ZIP)</button>
       </div>
       <textarea id="exportOutput" placeholder="Exported CSV will appear here..." readonly></textarea>
       <button class="btn" id="copyExportBtn" style="margin-top: 8px;">📋 Copy to Clipboard</button>

@@ -6,6 +6,7 @@ import {
   getTagsBySource,
   getStats,
   getAllKnownAddresses,
+  clearTagsBySource,
 } from '../storage/tagDatabase';
 import { parseCSV, tagsToCSV, fetchCSVFromURL } from '../storage/csvParser';
 import { Tag, ExtensionSettings, MessageType } from '../types';
@@ -129,6 +130,14 @@ chrome.runtime.onMessage.addListener((message: MessageType, sender, sendResponse
 });
 
 async function handleMessage(message: MessageType, sender: chrome.runtime.MessageSender) {
+  // Ensure database is initialized and ready
+  try {
+    await initDatabase();
+  } catch (error) {
+    console.error('[WalletTagger] Database initialization error:', error);
+    throw error;
+  }
+  
   switch (message.type) {
     case 'GET_TAGS': {
       const tags = getTagsForAddress(message.address);
@@ -154,11 +163,16 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
     }
 
     case 'IMPORT_CSV': {
-      const tags = parseCSV(message.csv, message.source);
-      const count = await importTags(tags, message.source);
-      // Notify all tabs to refresh
-      notifyAllTabs('TAGS_UPDATED');
-      return { count };
+      startKeepAlive();
+      try {
+        const tags = parseCSV(message.csv, message.source);
+        const count = await importTags(tags, message.source);
+        // Notify all tabs to refresh
+        notifyAllTabs('TAGS_UPDATED');
+        return { count };
+      } finally {
+        stopKeepAlive();
+      }
     }
 
     case 'IMPORT_ARKHAM_TAGS': {
@@ -173,6 +187,34 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       return { count };
     }
 
+    case 'IMPORT_TAGS': {
+      // Start keep-alive to prevent service worker termination
+      startKeepAlive();
+
+      try {
+        // Group tags by source
+        const tagsBySource: { [source: string]: Tag[] } = {};
+        for (const tag of message.tags) {
+          if (!tagsBySource[tag.source]) {
+            tagsBySource[tag.source] = [];
+          }
+          tagsBySource[tag.source].push(tag);
+        }
+
+        let totalCount = 0;
+        for (const [source, tags] of Object.entries(tagsBySource)) {
+          const count = await importTags(tags, source);
+          totalCount += count;
+        }
+
+        notifyAllTabs('TAGS_UPDATED');
+        return { count: totalCount };
+      } finally {
+        // Stop keep-alive
+        stopKeepAlive();
+      }
+    }
+
     case 'EXPORT_ARKHAM_TAGS': {
       const tags = await getTagsBySource('arkham');
       const csv = tagsToCSV(tags);
@@ -183,6 +225,69 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       const tags = await getTagsBySource('snowscan');
       const csv = tagsToCSV(tags);
       return { csv, count: tags.length };
+    }
+
+    case 'EXPORT_ALL_SOURCES': {
+      startKeepAlive();
+      try {
+        const stats = await getStats();
+        const sourceFiles: { [source: string]: string } = {};
+        let totalTags = 0;
+
+        for (const source of Object.keys(stats.sourceBreakdown)) {
+          const tags = await getTagsBySource(source);
+          const csv = tagsToCSV(tags);
+          sourceFiles[source] = csv;
+          totalTags += tags.length;
+        }
+
+        return {
+          sourceFiles,
+          totalTags,
+          sourceCount: Object.keys(sourceFiles).length,
+        };
+      } finally {
+        stopKeepAlive();
+      }
+    }
+
+    case 'EXPORT_SOURCE': {
+      const tags = await getTagsBySource(message.source);
+      const csv = tagsToCSV(tags);
+      return { csv, count: tags.length };
+    }
+
+    case 'UPDATE_SOURCE': {
+      startKeepAlive();
+      try {
+        // Parse the new CSV content
+        const tags = parseCSV(message.csv, message.source);
+
+        // Remove the old source and import the new tags
+        await clearTagsBySource(message.source);
+        const count = await importTags(tags, message.source);
+
+        notifyAllTabs('TAGS_UPDATED');
+        return { count };
+      } finally {
+        stopKeepAlive();
+      }
+    }
+
+    case 'REMOVE_SOURCE': {
+      startKeepAlive();
+      try {
+        // Get count before deletion for confirmation
+        const stats = getStats();
+        const currentStats = await stats;
+        const count = currentStats.sourceBreakdown[message.source] || 0;
+
+        await clearTagsBySource(message.source);
+        notifyAllTabs('TAGS_UPDATED');
+        return { count };
+      } finally {
+        stopKeepAlive();
+      }
     }
 
     case 'GET_SETTINGS': {
@@ -198,7 +303,7 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
     }
 
     default:
-      throw new Error(`Unknown message type`);
+      throw new Error(`Unknown message type: ${(message as any).type}`);
   }
 }
 
@@ -212,6 +317,24 @@ function notifyAllTabs(type: string) {
       }
     }
   });
+}
+
+// Keep service worker alive during long operations
+let keepAliveInterval: NodeJS.Timeout | null = null;
+
+function startKeepAlive() {
+  if (keepAliveInterval) return;
+  keepAliveInterval = setInterval(() => {
+    // Dummy operation to keep service worker alive
+    chrome.storage.local.get('keepAlive', () => {});
+  }, 10000); // Every 10 seconds
+}
+
+function stopKeepAlive() {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
 }
 
 // Initialize immediately if service worker is already active
