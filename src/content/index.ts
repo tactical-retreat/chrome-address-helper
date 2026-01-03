@@ -1052,7 +1052,7 @@ function addSnowscanImportButton() {
   const btn = document.createElement('button');
   btn.id = 'wt-snowscan-import';
   btn.className = 'wt-arkham-import-btn';
-  btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+  btn.textContent = '📥 Import to Wallet Tagger';
   btn.addEventListener('click', importSnowscanNotes);
 
   // Add to page - try to find a good position
@@ -1080,7 +1080,7 @@ async function importSnowscanNotes() {
     if (tags.length === 0) {
       btn.textContent = '❌ No notes found';
       setTimeout(() => {
-        btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+        btn.textContent = '📥 Import to Wallet Tagger';
         btn.disabled = false;
       }, 2000);
       return;
@@ -1098,57 +1098,22 @@ async function importSnowscanNotes() {
     if (response && response.count !== undefined) {
       btn.textContent = `✓ Imported ${response.count} notes`;
       console.log(`[WalletTagger] Successfully imported ${response.count} notes`);
-      
-      // Automatically export CSV for bundling/sharing
-      btn.textContent = `✓ Imported ${response.count} notes, exporting CSV...`;
-      await exportSnowscanToCSV(response.count);
-      btn.textContent = `✓ Imported ${response.count} notes (CSV exported)`;
     } else {
       console.error('[WalletTagger] Invalid response from background:', response);
       throw new Error('Invalid response from background script');
     }
 
     setTimeout(() => {
-      btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+      btn.textContent = '📥 Import to Wallet Tagger';
       btn.disabled = false;
     }, 3000);
   } catch (error) {
     console.error('[WalletTagger] SnowScan import failed:', error);
     btn.textContent = '❌ Import failed';
     setTimeout(() => {
-      btn.textContent = '📥 Import to Wallet Tagger and Download CSV';
+      btn.textContent = '📥 Import to Wallet Tagger';
       btn.disabled = false;
     }, 2000);
-  }
-}
-
-async function exportSnowscanToCSV(count: number): Promise<void> {
-  try {
-    // Get SnowScan tags from background as CSV
-    const response = await chrome.runtime.sendMessage({
-      type: 'EXPORT_SNOWSCAN_TAGS',
-    });
-
-    if (!response || !response.csv) {
-      console.error('[WalletTagger] Failed to export CSV');
-      return;
-    }
-
-    // Create download link
-    const blob = new Blob([response.csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'wt_snowscan_export_tags.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    console.log(`[WalletTagger] Exported ${count} SnowScan tags to wt_snowscan_export_tags.csv`);
-    console.log('[WalletTagger] To bundle with extension: Move the downloaded CSV to src/data/ and rebuild');
-  } catch (error) {
-    console.error('[WalletTagger] CSV export failed:', error);
   }
 }
 

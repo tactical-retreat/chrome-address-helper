@@ -107,6 +107,19 @@ document.getElementById('exportArkhamBtn')!.addEventListener('click', async () =
   showMessage(`Exported ${response.count} Arkham tags`, 'success');
 });
 
+// Export SnowScan Tags
+document.getElementById('exportSnowscanBtn')!.addEventListener('click', async () => {
+  const response = await chrome.runtime.sendMessage({ type: 'EXPORT_SNOWSCAN_TAGS' });
+  const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
+
+  if (response.count === 0) {
+    output.value = '# No SnowScan tags found. Import from SnowScan first.';
+  } else {
+    output.value = response.csv;
+  }
+  showMessage(`Exported ${response.count} SnowScan tags`, 'success');
+});
+
 // Export All Tags
 document.getElementById('exportAllBtn')!.addEventListener('click', async () => {
   const stats = await chrome.runtime.sendMessage({ type: 'GET_STATS' });
