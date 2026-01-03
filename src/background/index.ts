@@ -239,6 +239,29 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       }
     }
 
+    case 'EXPORT_SOURCE': {
+      const tags = await getTagsBySource(message.source);
+      const csv = tagsToCSV(tags);
+      return { csv, count: tags.length };
+    }
+
+    case 'UPDATE_SOURCE': {
+      startKeepAlive();
+      try {
+        // Parse the new CSV content
+        const tags = parseCSV(message.csv, message.source);
+        
+        // Remove the old source and import the new tags
+        await clearTagsBySource(message.source);
+        const count = await importTags(tags, message.source);
+        
+        notifyAllTabs('TAGS_UPDATED');
+        return { count };
+      } finally {
+        stopKeepAlive();
+      }
+    }
+
     case 'REMOVE_SOURCE': {
       startKeepAlive();
       try {

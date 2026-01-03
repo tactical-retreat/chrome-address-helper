@@ -75,6 +75,8 @@ export type MessageType =
   | { type: 'IMPORT_TAGS'; tags: Tag[] }
   | { type: 'EXPORT_ARKHAM_TAGS' }
   | { type: 'EXPORT_ALL_SOURCES' }
+  | { type: 'EXPORT_SOURCE'; source: string }
+  | { type: 'UPDATE_SOURCE'; source: string; csv: string }
   | { type: 'REMOVE_SOURCE'; source: string }
   | { type: 'GET_SETTINGS' }
   | { type: 'UPDATE_SETTINGS'; settings: Partial<ExtensionSettings> }
