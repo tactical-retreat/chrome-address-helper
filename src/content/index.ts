@@ -650,27 +650,13 @@ function handleArkhamAddresses() {
     // Check if we have our own tag for this address
     const tagData = tagCache.get(address);
     if (tagData) {
-      // Add green highlight styling to the link
+      // Just add green highlight - Arkham already shows labels, hover popup shows our tag details
       (link as HTMLElement).style.cssText += `
         background: rgba(74, 222, 128, 0.15) !important;
         border: 1px dashed #4ade80 !important;
         border-radius: 4px !important;
         padding: 2px 4px !important;
       `;
-
-      // Add tag label before the link text
-      const tagLabel = document.createElement('span');
-      tagLabel.className = 'wt-arkham-tag-label';
-      tagLabel.textContent = tagData.name;
-      tagLabel.style.cssText = `
-        display: inline-block;
-        color: #4ade80;
-        font-weight: 600;
-        margin-right: 6px;
-        font-size: 0.9em;
-      `;
-
-      link.insertBefore(tagLabel, link.firstChild);
     }
   }
 }
