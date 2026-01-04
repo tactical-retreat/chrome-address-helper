@@ -457,6 +457,108 @@ async function showControlPanelNow(target: HTMLElement, address: string) {
     }
 
     controlPanel.appendChild(tagsSection);
+  } else {
+    // No tags - show input form to add a new tag
+    const addTagSection = document.createElement('div');
+    addTagSection.className = 'wt-panel-add-tag';
+    addTagSection.style.cssText = 'padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.1);';
+
+    const inputWrapper = document.createElement('div');
+    inputWrapper.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+
+    const tagInput = document.createElement('input');
+    tagInput.type = 'text';
+    tagInput.placeholder = 'Enter tag name...';
+    tagInput.className = 'wt-tag-input';
+    tagInput.style.cssText = `
+      flex: 1;
+      padding: 6px 8px;
+      background: #2a2a4e;
+      border: 1px solid #3a3a5a;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-size: 12px;
+      outline: none;
+    `;
+    tagInput.addEventListener('focus', () => {
+      tagInput.style.borderColor = '#4ade80';
+    });
+    tagInput.addEventListener('blur', () => {
+      tagInput.style.borderColor = '#3a3a5a';
+    });
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '💾';
+    saveBtn.title = 'Save tag';
+    saveBtn.style.cssText = `
+      padding: 6px 10px;
+      background: #4ade80;
+      border: none;
+      border-radius: 4px;
+      color: #1a1a2e;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    `;
+    saveBtn.addEventListener('mouseenter', () => {
+      saveBtn.style.background = '#3bc970';
+    });
+    saveBtn.addEventListener('mouseleave', () => {
+      saveBtn.style.background = '#4ade80';
+    });
+
+    const saveTag = async () => {
+      const tagName = tagInput.value.trim();
+      if (!tagName) return;
+
+      saveBtn.textContent = '⏳';
+      saveBtn.disabled = true;
+
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'ADD_EXTENSION_TAG',
+          address: address,
+          name: tagName,
+        });
+        
+        // Show success feedback
+        saveBtn.textContent = '✓';
+        setTimeout(() => {
+          // Close the panel - it will reopen with the new tag
+          if (controlPanel) {
+            controlPanel.remove();
+            controlPanel = null;
+          }
+          if (controlPanelBridge) {
+            controlPanelBridge.remove();
+            controlPanelBridge = null;
+          }
+        }, 500);
+      } catch (error) {
+        console.error('[WalletTagger] Failed to save tag:', error);
+        saveBtn.textContent = '❌';
+        saveBtn.disabled = false;
+        setTimeout(() => {
+          saveBtn.textContent = '💾';
+        }, 2000);
+      }
+    };
+
+    saveBtn.addEventListener('click', saveTag);
+    tagInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        saveTag();
+      }
+    });
+
+    inputWrapper.appendChild(tagInput);
+    inputWrapper.appendChild(saveBtn);
+    addTagSection.appendChild(inputWrapper);
+
+    controlPanel.appendChild(addTagSection);
+
+    // Auto-focus the input after a brief delay
+    setTimeout(() => tagInput.focus(), 100);
   }
 
   // Actions section

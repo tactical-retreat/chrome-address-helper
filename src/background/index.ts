@@ -257,6 +257,12 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       return { csv, count: tags.length };
     }
 
+    case 'EXPORT_EXTENSION_TAGS': {
+      const tags = await getTagsBySource('extension');
+      const csv = tagsToCSV(tags);
+      return { csv, count: tags.length };
+    }
+
     case 'UPDATE_SOURCE': {
       startKeepAlive();
       try {
@@ -288,6 +294,21 @@ async function handleMessage(message: MessageType, sender: chrome.runtime.Messag
       } finally {
         stopKeepAlive();
       }
+    }
+
+    case 'ADD_EXTENSION_TAG': {
+      // Get existing extension tags and add the new one
+      const existingTags = await getTagsBySource('extension');
+      const newTag: Tag = {
+        address: message.address,
+        name: message.name,
+        source: 'extension',
+      };
+      // Check if this address already has an extension tag - if so, replace it
+      const filteredTags = existingTags.filter(t => t.address.toLowerCase() !== message.address.toLowerCase());
+      await importTags([...filteredTags, newTag], 'extension');
+      notifyAllTabs('TAGS_UPDATED');
+      return { success: true };
     }
 
     case 'GET_SETTINGS': {
