@@ -123,29 +123,9 @@ function showNormalMode() {
   `;
   
   // Re-add the original event listeners
-  document.getElementById('exportExtensionBtn')!.addEventListener('click', async () => {
-    const response = await chrome.runtime.sendMessage({ type: 'EXPORT_EXTENSION_TAGS' });
-    const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
-
-    if (response.count === 0) {
-      output.value = '# No WT tags found. Add tags by hovering over addresses.';
-    } else {
-      output.value = response.csv;
-    }
-    showMessage(`Exported ${response.count} WT tags`, 'success');
-  });
+  document.getElementById('exportExtensionBtn')!.addEventListener('click', exportExtensionTags);
   document.getElementById('exportArkhamBtn')!.addEventListener('click', exportArkhamTags);
-  document.getElementById('exportSnowscanBtn')!.addEventListener('click', async () => {
-    const response = await chrome.runtime.sendMessage({ type: 'EXPORT_SNOWSCAN_TAGS' });
-    const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
-
-    if (response.count === 0) {
-      output.value = '# No SnowScan tags found. Import from SnowScan first.';
-    } else {
-      output.value = response.csv;
-    }
-    showMessage(`Exported ${response.count} SnowScan tags`, 'success');
-  });
+  document.getElementById('exportSnowscanBtn')!.addEventListener('click', exportSnowscanTags);
   document.getElementById('exportAllBtn')!.addEventListener('click', exportAllTags);
   
   // Reset textarea
@@ -285,7 +265,7 @@ async function exportArkhamTags() {
 }
 
 // Export WT (Extension) Tags
-document.getElementById('exportExtensionBtn')!.addEventListener('click', async () => {
+async function exportExtensionTags() {
   const response = await chrome.runtime.sendMessage({ type: 'EXPORT_EXTENSION_TAGS' });
   const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
 
@@ -295,7 +275,20 @@ document.getElementById('exportExtensionBtn')!.addEventListener('click', async (
     output.value = response.csv;
   }
   showMessage(`Exported ${response.count} WT tags`, 'success');
-});
+}
+
+// Export SnowScan Tags
+async function exportSnowscanTags() {
+  const response = await chrome.runtime.sendMessage({ type: 'EXPORT_SNOWSCAN_TAGS' });
+  const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
+
+  if (response.count === 0) {
+    output.value = '# No SnowScan tags found. Import from SnowScan first.';
+  } else {
+    output.value = response.csv;
+  }
+  showMessage(`Exported ${response.count} SnowScan tags`, 'success');
+}
 
 async function exportAllTags() {
   try {
@@ -318,21 +311,14 @@ async function exportAllTags() {
   }
 }
 
+// Export Extension Tags
+document.getElementById('exportExtensionBtn')!.addEventListener('click', exportExtensionTags);
+
 // Export Arkham Tags
 document.getElementById('exportArkhamBtn')!.addEventListener('click', exportArkhamTags);
 
 // Export SnowScan Tags
-document.getElementById('exportSnowscanBtn')!.addEventListener('click', async () => {
-  const response = await chrome.runtime.sendMessage({ type: 'EXPORT_SNOWSCAN_TAGS' });
-  const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
-
-  if (response.count === 0) {
-    output.value = '# No SnowScan tags found. Import from SnowScan first.';
-  } else {
-    output.value = response.csv;
-  }
-  showMessage(`Exported ${response.count} SnowScan tags`, 'success');
-});
+document.getElementById('exportSnowscanBtn')!.addEventListener('click', exportSnowscanTags);
 
 // Export All Tags
 document.getElementById('exportAllBtn')!.addEventListener('click', exportAllTags);
