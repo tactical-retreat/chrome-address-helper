@@ -102,7 +102,9 @@ function showEditMode(source: string) {
   exportSection.innerHTML = `
     <button class="btn" id="saveEditBtn">💾 Save Changes</button>
     <button class="btn" id="cancelEditBtn">❌ Cancel</button>
+    <button class="btn" id="exportExtensionBtn" style="opacity: 0.5;" disabled>Export WT Tags</button>
     <button class="btn" id="exportArkhamBtn" style="opacity: 0.5;" disabled>Export Arkham Tags</button>
+    <button class="btn" id="exportSnowscanBtn" style="opacity: 0.5;" disabled>Export SnowScan Tags</button>
     <button class="btn" id="exportAllBtn" style="opacity: 0.5;" disabled>Export All Tags (ZIP)</button>
   `;
   
@@ -114,12 +116,36 @@ function showEditMode(source: string) {
 function showNormalMode() {
   const exportSection = document.querySelector('.export-section') as HTMLElement;
   exportSection.innerHTML = `
+    <button class="btn" id="exportExtensionBtn">Export WT Tags</button>
     <button class="btn" id="exportArkhamBtn">Export Arkham Tags</button>
+    <button class="btn" id="exportSnowscanBtn">Export SnowScan Tags</button>
     <button class="btn" id="exportAllBtn">Export All Tags (ZIP)</button>
   `;
   
   // Re-add the original event listeners
+  document.getElementById('exportExtensionBtn')!.addEventListener('click', async () => {
+    const response = await chrome.runtime.sendMessage({ type: 'EXPORT_EXTENSION_TAGS' });
+    const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
+
+    if (response.count === 0) {
+      output.value = '# No WT tags found. Add tags by hovering over addresses.';
+    } else {
+      output.value = response.csv;
+    }
+    showMessage(`Exported ${response.count} WT tags`, 'success');
+  });
   document.getElementById('exportArkhamBtn')!.addEventListener('click', exportArkhamTags);
+  document.getElementById('exportSnowscanBtn')!.addEventListener('click', async () => {
+    const response = await chrome.runtime.sendMessage({ type: 'EXPORT_SNOWSCAN_TAGS' });
+    const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
+
+    if (response.count === 0) {
+      output.value = '# No SnowScan tags found. Import from SnowScan first.';
+    } else {
+      output.value = response.csv;
+    }
+    showMessage(`Exported ${response.count} SnowScan tags`, 'success');
+  });
   document.getElementById('exportAllBtn')!.addEventListener('click', exportAllTags);
   
   // Reset textarea
@@ -257,6 +283,19 @@ async function exportArkhamTags() {
   }
   showMessage(`Exported ${response.count} Arkham tags`, 'success');
 }
+
+// Export WT (Extension) Tags
+document.getElementById('exportExtensionBtn')!.addEventListener('click', async () => {
+  const response = await chrome.runtime.sendMessage({ type: 'EXPORT_EXTENSION_TAGS' });
+  const output = document.getElementById('exportOutput') as HTMLTextAreaElement;
+
+  if (response.count === 0) {
+    output.value = '# No WT tags found. Add tags by hovering over addresses.';
+  } else {
+    output.value = response.csv;
+  }
+  showMessage(`Exported ${response.count} WT tags`, 'success');
+});
 
 async function exportAllTags() {
   try {

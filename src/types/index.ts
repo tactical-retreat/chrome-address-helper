@@ -80,6 +80,8 @@ export type MessageType =
   | { type: 'EXPORT_SOURCE'; source: string }
   | { type: 'UPDATE_SOURCE'; source: string; csv: string }
   | { type: 'REMOVE_SOURCE'; source: string }
+  | { type: 'EXPORT_EXTENSION_TAGS' }
+  | { type: 'ADD_EXTENSION_TAG'; address: string; name: string }
   | { type: 'GET_SETTINGS' }
   | { type: 'UPDATE_SETTINGS'; settings: Partial<ExtensionSettings> }
   | { type: 'GET_STATS' };
