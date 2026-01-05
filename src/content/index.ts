@@ -286,7 +286,7 @@ function createAddressElement(address: string, displayText: string): HTMLElement
     // Show tag name
     const tagLabel = document.createElement('span');
     tagLabel.className = 'wt-tag-label';
-    tagLabel.textContent = tagData.name;
+    tagLabel.textContent = tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name;
     wrapper.appendChild(tagLabel);
 
     // Show short address in parentheses
@@ -783,7 +783,8 @@ function processTransactionRow(link: HTMLAnchorElement) {
 
   // Create and append tag cell at the end
   const tagData = tagCache.get(address);
-  const tagCell = createTagCell(address, tagData?.name);
+  const displayName = tagData ? (tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name) : undefined;
+  const tagCell = createTagCell(address, displayName);
   td.appendChild(tagCell);
   td.classList.add('wt-tag-col-added');
 }
@@ -882,7 +883,8 @@ function processGridRow(row: HTMLElement, tableName: string) {
 
   // Create and append tag cell at the end
   const tagData = tagCache.get(address);
-  const tagCell = createTagCell(address, tagData?.name);
+  const displayName = tagData ? (tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name) : undefined;
+  const tagCell = createTagCell(address, displayName);
   row.appendChild(tagCell);
 
   row.classList.add('wt-tag-col-added');
