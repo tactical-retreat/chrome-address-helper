@@ -12,6 +12,19 @@ let knownAddresses: string[] = [];
 let tagCache: Map<string, { name: string; entity?: string }> = new Map();
 let enabled = true;
 
+/**
+ * Format tag display name with entity/name/address logic
+ * Priority: 'Entity: Name' > 'Entity: (0xabc...)' > 'Name'
+ */
+function formatTagDisplay(tagData: { name: string; entity?: string }, address: string): string {
+  if (tagData.entity) {
+    return tagData.entity === tagData.name
+      ? `${tagData.entity}: (${address.slice(0, 6)})`
+      : `${tagData.entity}: ${tagData.name}`;
+  }
+  return tagData.name;
+}
+
 // Check if an element or any of its ancestors is already processed or is our panel
 function isAlreadyProcessed(element: Element | null): boolean {
   while (element) {
@@ -286,14 +299,16 @@ function createAddressElement(address: string, displayText: string): HTMLElement
     // Show tag name
     const tagLabel = document.createElement('span');
     tagLabel.className = 'wt-tag-label';
-    tagLabel.textContent = tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name;
+    tagLabel.textContent = formatTagDisplay(tagData, address);
     wrapper.appendChild(tagLabel);
 
-    // Show short address in parentheses
-    const shortAddr = document.createElement('span');
-    shortAddr.className = 'wt-tag-short-address';
-    shortAddr.textContent = ` (${address.slice(0, 6)})`;
-    wrapper.appendChild(shortAddr);
+    // Show short address in parentheses (only if not entity-only, since address is already in label)
+    if (!(tagData.entity && tagData.entity === tagData.name)) {
+      const shortAddr = document.createElement('span');
+      shortAddr.className = 'wt-tag-short-address';
+      shortAddr.textContent = ` (${address.slice(0, 6)})`;
+      wrapper.appendChild(shortAddr);
+    }
   } else {
     // No tag - just show the original display text
     const textSpan = document.createElement('span');
@@ -425,7 +440,9 @@ async function showControlPanelNow(target: HTMLElement, address: string) {
 
       const tagName = document.createElement('span');
       tagName.className = 'wt-tag-name';
-      tagName.textContent = tag.entity ? `${tag.entity}: ${tag.name}` : tag.name;
+      tagName.textContent = tag.entity
+        ? (tag.entity === tag.name ? tag.entity : `${tag.entity}: ${tag.name}`)
+        : tag.name;
       tagEl.appendChild(tagName);
 
       const tagSource = document.createElement('span');
@@ -783,7 +800,7 @@ function processTransactionRow(link: HTMLAnchorElement) {
 
   // Create and append tag cell at the end
   const tagData = tagCache.get(address);
-  const displayName = tagData ? (tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name) : undefined;
+  const displayName = tagData ? formatTagDisplay(tagData, address) : undefined;
   const tagCell = createTagCell(address, displayName);
   td.appendChild(tagCell);
   td.classList.add('wt-tag-col-added');
@@ -883,7 +900,7 @@ function processGridRow(row: HTMLElement, tableName: string) {
 
   // Create and append tag cell at the end
   const tagData = tagCache.get(address);
-  const displayName = tagData ? (tagData.entity ? `${tagData.entity}: ${tagData.name}` : tagData.name) : undefined;
+  const displayName = tagData ? formatTagDisplay(tagData, address) : undefined;
   const tagCell = createTagCell(address, displayName);
   row.appendChild(tagCell);
 
