@@ -4,7 +4,6 @@ import {
   normalizeAddress,
   truncateAddress,
   matchTruncatedAddress,
-  matchShortAddress,
 } from '../utils/address';
 import './styles.css';
 
@@ -86,6 +85,10 @@ function scanPage() {
         if (!parent) return NodeFilter.FILTER_REJECT;
         const tagName = parent.tagName.toLowerCase();
         if (['script', 'style', 'noscript', 'textarea', 'input'].includes(tagName)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        // Skip editable elements (contenteditable divs, etc.)
+        if (parent.closest('[contenteditable="true"]')) {
           return NodeFilter.FILTER_REJECT;
         }
         // Skip already processed - check ancestors too
@@ -184,18 +187,6 @@ function processTruncatedAddresses(textNode: Text) {
     const matched = matchTruncatedAddress(truncMatch[0], knownAddresses);
     if (matched) {
       wrapWithAddressElement(textNode, truncMatch.index, truncMatch[0].length, matched);
-      return;
-    }
-  }
-
-  // Check for short format (0x923)
-  const shortRegex = /\(0x[a-fA-F0-9]{3,6}\)/gi;
-  let shortMatch;
-
-  while ((shortMatch = shortRegex.exec(text)) !== null) {
-    const matched = matchShortAddress(shortMatch[0], knownAddresses);
-    if (matched) {
-      wrapWithAddressElement(textNode, shortMatch.index, shortMatch[0].length, matched);
       return;
     }
   }

@@ -1,7 +1,5 @@
 // EVM address regex - matches full 0x addresses (42 chars) and truncated formats
 const FULL_ADDRESS_REGEX = /0x[a-fA-F0-9]{40}/g;
-const TRUNCATED_ADDRESS_REGEX = /0x[a-fA-F0-9]{2,10}\.{2,3}[a-fA-F0-9]{2,10}/g;
-const SHORT_ADDRESS_REGEX = /\(0x[a-fA-F0-9]{3,6}\)/g;
 
 export function normalizeAddress(address: string): string {
   return address.toLowerCase();
@@ -64,26 +62,6 @@ export function matchTruncatedAddress(
       normalized.slice(2, 2 + prefix.length) === prefix &&
       normalized.slice(-suffix.length) === suffix
     ) {
-      return normalized;
-    }
-  }
-
-  return null;
-}
-
-// Match short address format like (0x923)
-export function matchShortAddress(
-  short: string,
-  knownAddresses: string[]
-): string | null {
-  const match = short.match(/\(0x([a-fA-F0-9]{3,6})\)/i);
-  if (!match) return null;
-
-  const prefix = match[1].toLowerCase();
-
-  for (const address of knownAddresses) {
-    const normalized = normalizeAddress(address);
-    if (normalized.slice(2, 2 + prefix.length) === prefix) {
       return normalized;
     }
   }
