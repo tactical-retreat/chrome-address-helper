@@ -29,6 +29,7 @@ function isAlreadyProcessed(element: Element | null): boolean {
   while (element) {
     if (
       element.classList.contains('wt-processed') ||
+      element.classList.contains('wt-arkham-processed') ||
       element.classList.contains('wt-address-wrapper') ||
       element.classList.contains('wt-address-text') ||
       element.classList.contains('wt-indicator') ||
