@@ -7,6 +7,7 @@ import {
   getStats,
   getAllKnownAddresses,
   clearTagsBySource,
+  hasSource,
 } from '../storage/tagDatabase';
 import { parseCSV, tagsToCSV, fetchCSVFromURL } from '../storage/csvParser';
 import { Tag, ExtensionSettings, MessageType } from '../types';
@@ -71,6 +72,9 @@ async function loadBundledTags() {
 
     for (const filename of bundledFiles) {
       try {
+        if (hasSource(filename)) {
+          continue;
+        }
         const url = chrome.runtime.getURL(`data/${filename}`);
         const response = await fetch(url);
         if (response.ok) {

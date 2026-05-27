@@ -196,6 +196,13 @@ export async function getStats(): Promise<TagStats> {
   };
 }
 
+export function hasSource(source: string): boolean {
+  for (const tags of Object.values(tagCache)) {
+    if (tags.some(t => t.source === source)) return true;
+  }
+  return false;
+}
+
 export function isCacheReady(): boolean {
   return cacheReady;
 }
