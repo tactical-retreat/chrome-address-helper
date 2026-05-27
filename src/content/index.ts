@@ -62,14 +62,16 @@ async function initialize() {
   enabled = settings?.enabled ?? true;
 
   if (enabled) {
-    // Initial scan
-    scanPage();
-
-    // Watch for dynamic content
-    observeDOM();
-
-    // Check for special pages
+    // Check for special pages first
     handleSpecialPages();
+
+    // Skip generic text node scanning on React-managed sites
+    // to avoid DOM conflicts that crash the page
+    const isReactSite = window.location.hostname === 'intel.arkm.com';
+    if (!isReactSite) {
+      scanPage();
+      observeDOM();
+    }
   }
 }
 
@@ -661,9 +663,18 @@ function handleSpecialPages() {
     // Add hover controls to Arkham's existing address elements
     setTimeout(handleArkhamAddresses, 1000);
 
-    // Also observe for dynamically loaded content
+    // Also observe for dynamically loaded content and SPA navigation
+    let lastArkhamPath = window.location.pathname;
     const arkhamObserver = new MutationObserver(() => {
       handleArkhamAddresses();
+      // Detect SPA navigation to a new address page
+      if (window.location.pathname !== lastArkhamPath) {
+        lastArkhamPath = window.location.pathname;
+        if (window.location.pathname.startsWith('/explorer/address/0x')) {
+          arkhamAddressPageRetries = 0;
+          setTimeout(handleArkhamAddressPage, 1000);
+        }
+      }
     });
     arkhamObserver.observe(document.body, { childList: true, subtree: true });
 
@@ -674,6 +685,7 @@ function handleSpecialPages() {
 
     // Show tag info panel on address pages
     if (window.location.pathname.startsWith('/explorer/address/0x')) {
+      arkhamAddressPageRetries = 0;
       setTimeout(handleArkhamAddressPage, 1000);
     }
   }
@@ -701,69 +713,69 @@ function handleArkhamLabelsPage() {
   setTimeout(addArkhamImportButton, 2000);
 }
 
-function handleArkhamAddressPage() {
-  console.log('[WalletTagger] handleArkhamAddressPage called');
+let arkhamAddressPageRetries = 0;
+const ARKHAM_MAX_RETRIES = 20;
 
-  // Extract address from URL
+function handleArkhamAddressPage() {
   const match = window.location.pathname.match(/\/explorer\/address\/(0x[a-fA-F0-9]{40})/i);
-  if (!match) {
-    console.log('[WalletTagger] No address match in URL');
-    return;
-  }
+  if (!match) return;
 
   const address = normalizeAddress(match[1]);
-  console.log('[WalletTagger] Address:', address);
 
-  // Check if already inserted
-  if (document.getElementById('wt-arkham-inline-tag')) {
-    console.log('[WalletTagger] Already inserted');
+  if (document.getElementById('wt-arkham-inline-tag')) return;
+
+  if (arkhamAddressPageRetries >= ARKHAM_MAX_RETRIES) {
+    console.log('[WalletTagger] Gave up inserting inline tag after max retries');
     return;
   }
 
-  // Find the portfolio value span (format: $XX,XXX.XX) and navigate to its container
-  const spans = Array.from(document.querySelectorAll('span'));
+  // Find portfolio value span inside main (avoid nav bar's $0.00)
+  const mainEl = document.querySelector('main');
+  if (!mainEl) {
+    arkhamAddressPageRetries++;
+    setTimeout(handleArkhamAddressPage, 500);
+    return;
+  }
+
+  const spans = Array.from(mainEl.querySelectorAll('span'));
   const valueSpan = spans.find(s => s.textContent?.match(/^\$[\d,]+\.\d{2}$/));
 
   if (!valueSpan) {
-    console.log('[WalletTagger] Value span not found, retrying...');
+    arkhamAddressPageRetries++;
     setTimeout(handleArkhamAddressPage, 500);
     return;
   }
-  console.log('[WalletTagger] Found value span:', valueSpan.textContent);
 
-  // Navigate: valueSpan -> value div -> parent container
-  const valueDiv = valueSpan.closest('div');
-  const headerContent = valueDiv?.parentElement;
-
-  console.log('[WalletTagger] valueDiv:', valueDiv?.className);
-  console.log('[WalletTagger] headerContent children:', headerContent?.children.length);
-
+  // Walk up from value span to the header container (has chains, value, tags rows)
+  let headerContent = valueSpan.parentElement?.parentElement;
   if (!headerContent || headerContent.children.length < 3) {
-    console.log('[WalletTagger] Header content not ready, retrying...');
+    arkhamAddressPageRetries++;
     setTimeout(handleArkhamAddressPage, 500);
     return;
   }
 
-  // The third child (index 2) is typically the empty risk/tags container
-  const tagsContainer = headerContent.children[2] as HTMLElement;
-  console.log('[WalletTagger] Tags container:', tagsContainer?.className);
+  // Wait for tag cache to be ready before inserting
+  if (tagCache.size === 0) {
+    arkhamAddressPageRetries++;
+    setTimeout(handleArkhamAddressPage, 500);
+    return;
+  }
 
-  // Create inline tag element using the standard display mechanism
   const wrapper = document.createElement('div');
   wrapper.id = 'wt-arkham-inline-tag';
-  wrapper.style.cssText = 'display: inline-block;';
+  wrapper.style.cssText = 'margin-top: 4px;';
 
   const tagEl = createAddressElement(address, address);
-  // Always show green so it stands out as hoverable
   tagEl.classList.add('wt-has-tag');
   wrapper.appendChild(tagEl);
 
-  // Insert into the tags container
-  tagsContainer.appendChild(wrapper);
-  console.log('[WalletTagger] Inserted tag element');
+  // Append as last child of the header column so it appears on its own row
+  headerContent.appendChild(wrapper);
+  console.log('[WalletTagger] Inserted inline tag element');
 }
 
 let suppressArkhamPopups = false;
+let arkhamProcessedLinks = new WeakSet<Element>();
 
 function handleArkhamAddresses() {
   // Inject CSS to hide Arkham's popups only when hovering a processed address
@@ -808,11 +820,33 @@ function handleArkhamAddresses() {
     popupObserver.observe(document.body, { childList: true, subtree: true });
   }
 
-  // Find Arkham's address links that haven't been processed (exclude our own panel)
-  const addressLinks = document.querySelectorAll('a[href*="/explorer/address/0x"]:not(.wt-arkham-processed):not(.wt-action-btn)');
+  // Inject CSS-based styling for tagged addresses (avoids modifying React DOM)
+  if (!document.getElementById('wt-arkham-tag-styles')) {
+    const tagStyle = document.createElement('style');
+    tagStyle.id = 'wt-arkham-tag-styles';
+    tagStyle.textContent = `
+      a[data-wt-tagged="true"] {
+        background: rgba(74, 222, 128, 0.15) !important;
+        border: 1px dashed #4ade80 !important;
+        border-radius: 4px !important;
+        padding: 2px 4px !important;
+      }
+      a[data-wt-tag] > * {
+        display: none !important;
+      }
+      a[data-wt-tag]::after {
+        content: attr(data-wt-tag);
+      }
+    `;
+    document.head.appendChild(tagStyle);
+  }
+
+  // Track processed links without modifying their classList
+  const addressLinks = document.querySelectorAll('a[href*="/explorer/address/0x"]:not(.wt-action-btn)');
 
   for (const link of addressLinks) {
-    link.classList.add('wt-arkham-processed');
+    if (arkhamProcessedLinks.has(link)) continue;
+    arkhamProcessedLinks.add(link);
 
     // Extract address from href
     const href = link.getAttribute('href') || '';
@@ -821,7 +855,7 @@ function handleArkhamAddresses() {
 
     const address = normalizeAddress(match[0]);
 
-    // Add our hover controls — suppress Arkham popups only while hovering
+    // Add hover controls (event listeners don't modify DOM)
     link.addEventListener('mouseenter', (e) => {
       suppressArkhamPopups = true;
       document.body.classList.add('wt-suppress-popups');
@@ -831,26 +865,15 @@ function handleArkhamAddresses() {
       hideControlPanelDelayed();
     });
 
-    // Check if we have our own tag for this address
+    // Mark tagged addresses via data attributes (safe for React)
     const tagData = tagCache.get(address);
     if (tagData) {
-      (link as HTMLElement).style.cssText += `
-        background: rgba(74, 222, 128, 0.15) !important;
-        border: 1px dashed #4ade80 !important;
-        border-radius: 4px !important;
-        padding: 2px 4px !important;
-      `;
-
-      // If Arkham is showing a raw address (starts with 0x), replace the text
-      // with our tag name. This works within Arkham's existing layout/truncation
-      // instead of injecting extra elements that break the layout.
+      link.setAttribute('data-wt-tagged', 'true');
+      // Show tag name via CSS ::after for links displaying raw addresses
       const linkText = (link.textContent || '').trim();
-      if (linkText.startsWith('0x')) {
-        const shortenSpan = link.querySelector('[class*="shorten"]');
-        if (shortenSpan && !shortenSpan.classList.contains('wt-arkham-tag-replaced')) {
-          shortenSpan.textContent = formatTagDisplay(tagData, address);
-          shortenSpan.classList.add('wt-arkham-tag-replaced');
-        }
+      const isRawAddress = /^0x[a-fA-F0-9]+$/.test(linkText.replace(/[.\s()]/g, ''));
+      if (isRawAddress) {
+        link.setAttribute('data-wt-tag', formatTagDisplay(tagData, address));
       }
     }
   }
@@ -1482,23 +1505,30 @@ chrome.runtime.onMessage.addListener((message) => {
         tagCache = new Map(Object.entries(response.tags));
         knownAddresses = Array.from(tagCache.keys());
 
-        // Remove existing markers and rescan
-        document.querySelectorAll('.wt-processed').forEach((el) => {
-          el.classList.remove('wt-processed');
-        });
-        document.querySelectorAll('.wt-address-wrapper').forEach((el) => {
-          // Restore original address from data attribute
-          const address = el.getAttribute('data-address') || '';
-          el.replaceWith(document.createTextNode(address));
-        });
-        // Reset Arkham processing so addresses get re-evaluated with new tags
-        document.querySelectorAll('.wt-arkham-tag-replaced').forEach((el) => {
-          el.classList.remove('wt-arkham-tag-replaced');
-        });
-        document.querySelectorAll('.wt-arkham-processed').forEach((el) => {
-          el.classList.remove('wt-arkham-processed');
-        });
-        scanPage();
+        const isArkham = window.location.hostname === 'intel.arkm.com';
+
+        if (!isArkham) {
+          // Remove existing markers and rescan on non-React sites
+          document.querySelectorAll('.wt-processed').forEach((el) => {
+            el.classList.remove('wt-processed');
+          });
+          document.querySelectorAll('.wt-address-wrapper').forEach((el) => {
+            const address = el.getAttribute('data-address') || '';
+            el.replaceWith(document.createTextNode(address));
+          });
+          scanPage();
+        }
+
+        // Refresh the Arkham inline tag with updated cache
+        const inlineTag = document.getElementById('wt-arkham-inline-tag');
+        if (inlineTag) {
+          inlineTag.remove();
+          arkhamAddressPageRetries = 0;
+          handleArkhamAddressPage();
+        }
+
+        // Re-process Arkham address links with fresh tag data
+        arkhamProcessedLinks = new WeakSet<Element>();
         handleArkhamAddresses();
       }
     });
