@@ -608,6 +608,8 @@ function hideControlPanelDelayed() {
       controlPanelBridge = null;
     }
     currentPanelAddress = null;
+    suppressArkhamPopups = false;
+    document.body.classList.remove('wt-suppress-popups');
   }, 500);  // Delay to allow moving to panel
 }
 
@@ -669,6 +671,11 @@ function handleSpecialPages() {
     if (window.location.pathname === '/labels') {
       handleArkhamLabelsPage();
     }
+
+    // Show tag info panel on address pages
+    if (window.location.pathname.startsWith('/explorer/address/0x')) {
+      setTimeout(handleArkhamAddressPage, 1000);
+    }
   }
 
   if (hostname === 'snowscan.xyz') {
@@ -694,18 +701,80 @@ function handleArkhamLabelsPage() {
   setTimeout(addArkhamImportButton, 2000);
 }
 
+function handleArkhamAddressPage() {
+  console.log('[WalletTagger] handleArkhamAddressPage called');
+
+  // Extract address from URL
+  const match = window.location.pathname.match(/\/explorer\/address\/(0x[a-fA-F0-9]{40})/i);
+  if (!match) {
+    console.log('[WalletTagger] No address match in URL');
+    return;
+  }
+
+  const address = normalizeAddress(match[1]);
+  console.log('[WalletTagger] Address:', address);
+
+  // Check if already inserted
+  if (document.getElementById('wt-arkham-inline-tag')) {
+    console.log('[WalletTagger] Already inserted');
+    return;
+  }
+
+  // Find the portfolio value span (format: $XX,XXX.XX) and navigate to its container
+  const spans = Array.from(document.querySelectorAll('span'));
+  const valueSpan = spans.find(s => s.textContent?.match(/^\$[\d,]+\.\d{2}$/));
+
+  if (!valueSpan) {
+    console.log('[WalletTagger] Value span not found, retrying...');
+    setTimeout(handleArkhamAddressPage, 500);
+    return;
+  }
+  console.log('[WalletTagger] Found value span:', valueSpan.textContent);
+
+  // Navigate: valueSpan -> value div -> parent container
+  const valueDiv = valueSpan.closest('div');
+  const headerContent = valueDiv?.parentElement;
+
+  console.log('[WalletTagger] valueDiv:', valueDiv?.className);
+  console.log('[WalletTagger] headerContent children:', headerContent?.children.length);
+
+  if (!headerContent || headerContent.children.length < 3) {
+    console.log('[WalletTagger] Header content not ready, retrying...');
+    setTimeout(handleArkhamAddressPage, 500);
+    return;
+  }
+
+  // The third child (index 2) is typically the empty risk/tags container
+  const tagsContainer = headerContent.children[2] as HTMLElement;
+  console.log('[WalletTagger] Tags container:', tagsContainer?.className);
+
+  // Create inline tag element using the standard display mechanism
+  const wrapper = document.createElement('div');
+  wrapper.id = 'wt-arkham-inline-tag';
+  wrapper.style.cssText = 'display: inline-block;';
+
+  const tagEl = createAddressElement(address, address);
+  // Always show green so it stands out as hoverable
+  tagEl.classList.add('wt-has-tag');
+  wrapper.appendChild(tagEl);
+
+  // Insert into the tags container
+  tagsContainer.appendChild(wrapper);
+  console.log('[WalletTagger] Inserted tag element');
+}
+
+let suppressArkhamPopups = false;
+
 function handleArkhamAddresses() {
-  // Inject CSS to hide Arkham's popups (only once)
+  // Inject CSS to hide Arkham's popups only when hovering a processed address
   if (!document.getElementById('wt-arkham-popup-blocker')) {
     const style = document.createElement('style');
     style.id = 'wt-arkham-popup-blocker';
     style.textContent = `
-      /* Hide Arkham's hover popups - but not our panel */
-      [data-radix-popper-content-wrapper]:not(.wt-control-panel),
-      [data-floating-ui-portal]:not(.wt-control-panel),
-      [data-radix-portal]:not(.wt-control-panel),
-      div[style*="position: absolute"][style*="left:"]:not(.wt-control-panel):not(.wt-control-panel-bridge):has(a[href*="/explorer/"]),
-      div[style*="position: fixed"][style*="left:"]:not(.wt-control-panel):not(.wt-control-panel-bridge):has(a[href*="/explorer/"]) {
+      /* Hide Arkham's hover popups only when our panel is active */
+      body.wt-suppress-popups [data-radix-popper-content-wrapper]:not(.wt-control-panel),
+      body.wt-suppress-popups [data-floating-ui-portal]:not(.wt-control-panel),
+      body.wt-suppress-popups [data-radix-portal]:not(.wt-control-panel) {
         display: none !important;
         visibility: hidden !important;
         pointer-events: none !important;
@@ -713,18 +782,16 @@ function handleArkhamAddresses() {
     `;
     document.head.appendChild(style);
 
-    // Also use MutationObserver as backup to remove popups
     const popupObserver = new MutationObserver((mutations) => {
+      if (!suppressArkhamPopups) return;
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node instanceof HTMLElement) {
-            // Skip our own elements
             if (node.classList.contains('wt-control-panel') ||
                 node.classList.contains('wt-control-panel-bridge') ||
                 node.closest('.wt-control-panel')) {
               continue;
             }
-            // Arkham uses radix/floating-ui for popups
             if (
               node.hasAttribute('data-radix-popper-content-wrapper') ||
               node.hasAttribute('data-floating-ui-portal') ||
@@ -754,20 +821,37 @@ function handleArkhamAddresses() {
 
     const address = normalizeAddress(match[0]);
 
-    // Add our hover controls
-    link.addEventListener('mouseenter', (e) => showControlPanel(e as MouseEvent, address));
-    link.addEventListener('mouseleave', hideControlPanelDelayed);
+    // Add our hover controls — suppress Arkham popups only while hovering
+    link.addEventListener('mouseenter', (e) => {
+      suppressArkhamPopups = true;
+      document.body.classList.add('wt-suppress-popups');
+      showControlPanel(e as MouseEvent, address);
+    });
+    link.addEventListener('mouseleave', () => {
+      hideControlPanelDelayed();
+    });
 
     // Check if we have our own tag for this address
     const tagData = tagCache.get(address);
     if (tagData) {
-      // Just add green highlight - Arkham already shows labels, hover popup shows our tag details
       (link as HTMLElement).style.cssText += `
         background: rgba(74, 222, 128, 0.15) !important;
         border: 1px dashed #4ade80 !important;
         border-radius: 4px !important;
         padding: 2px 4px !important;
       `;
+
+      // If Arkham is showing a raw address (starts with 0x), replace the text
+      // with our tag name. This works within Arkham's existing layout/truncation
+      // instead of injecting extra elements that break the layout.
+      const linkText = (link.textContent || '').trim();
+      if (linkText.startsWith('0x')) {
+        const shortenSpan = link.querySelector('[class*="shorten"]');
+        if (shortenSpan && !shortenSpan.classList.contains('wt-arkham-tag-replaced')) {
+          shortenSpan.textContent = formatTagDisplay(tagData, address);
+          shortenSpan.classList.add('wt-arkham-tag-replaced');
+        }
+      }
     }
   }
 }
@@ -1407,7 +1491,15 @@ chrome.runtime.onMessage.addListener((message) => {
           const address = el.getAttribute('data-address') || '';
           el.replaceWith(document.createTextNode(address));
         });
+        // Reset Arkham processing so addresses get re-evaluated with new tags
+        document.querySelectorAll('.wt-arkham-tag-replaced').forEach((el) => {
+          el.classList.remove('wt-arkham-tag-replaced');
+        });
+        document.querySelectorAll('.wt-arkham-processed').forEach((el) => {
+          el.classList.remove('wt-arkham-processed');
+        });
         scanPage();
+        handleArkhamAddresses();
       }
     });
   }
