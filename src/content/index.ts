@@ -667,6 +667,7 @@ function handleSpecialPages() {
     let lastArkhamPath = window.location.pathname;
     const arkhamObserver = new MutationObserver(() => {
       handleArkhamAddresses();
+      handleArkhamLabelAddresses();
       // Detect SPA navigation to a new address page
       if (window.location.pathname !== lastArkhamPath) {
         lastArkhamPath = window.location.pathname;
@@ -729,26 +730,30 @@ function handleArkhamAddressPage() {
     return;
   }
 
-  // Find portfolio value span inside main (avoid nav bar's $0.00)
+  // Find the header container via the address label input
   const mainEl = document.querySelector('main');
-  if (!mainEl) {
+  const labelInput = mainEl?.querySelector('input[class*="outline-none"][class*="bg-"]') as HTMLInputElement | null;
+  if (!labelInput) {
     arkhamAddressPageRetries++;
     setTimeout(handleArkhamAddressPage, 500);
     return;
   }
 
-  const spans = Array.from(mainEl.querySelectorAll('span'));
-  const valueSpan = spans.find(s => s.textContent?.match(/^\$[\d,]+\.\d{2}$/));
-
-  if (!valueSpan) {
-    arkhamAddressPageRetries++;
-    setTimeout(handleArkhamAddressPage, 500);
-    return;
+  // Walk up from label input to the flex-col header container
+  let headerContent: HTMLElement | null = null;
+  let el: HTMLElement | null = labelInput;
+  for (let i = 0; i < 12 && el; i++) {
+    el = el.parentElement;
+    if (!el) break;
+    const style = getComputedStyle(el);
+    if (style.flexDirection === 'column' && el.children.length >= 3 &&
+        (el.textContent || '').includes('Chains:')) {
+      headerContent = el;
+      break;
+    }
   }
 
-  // Walk up from value span to the header container (has chains, value, tags rows)
-  let headerContent = valueSpan.parentElement?.parentElement;
-  if (!headerContent || headerContent.children.length < 3) {
+  if (!headerContent) {
     arkhamAddressPageRetries++;
     setTimeout(handleArkhamAddressPage, 500);
     return;
@@ -825,7 +830,7 @@ function handleArkhamAddresses() {
     const tagStyle = document.createElement('style');
     tagStyle.id = 'wt-arkham-tag-styles';
     tagStyle.textContent = `
-      a[data-wt-tagged="true"] {
+      [data-wt-tagged="true"] {
         background: rgba(74, 222, 128, 0.15) !important;
         border: 1px dashed #4ade80 !important;
         border-radius: 4px !important;
@@ -836,6 +841,13 @@ function handleArkhamAddresses() {
       }
       a[data-wt-tag]::after {
         content: attr(data-wt-tag);
+      }
+      div[data-wt-hover] {
+        cursor: pointer;
+      }
+      div[data-wt-hover]:hover {
+        background: rgba(74, 222, 128, 0.15);
+        border-radius: 4px;
       }
     `;
     document.head.appendChild(tagStyle);
@@ -875,6 +887,39 @@ function handleArkhamAddresses() {
       if (isRawAddress) {
         link.setAttribute('data-wt-tag', formatTagDisplay(tagData, address));
       }
+    }
+  }
+}
+
+const labelAddressProcessed = new WeakSet<Element>();
+
+function handleArkhamLabelAddresses() {
+  // Handle the EVM address list on entity label pages (/labels/...)
+  // These are plain divs, not links, so handleArkhamAddresses doesn't cover them
+  const addressDivs = document.querySelectorAll('[class*="entityAddressAddress"]');
+
+  for (const div of addressDivs) {
+    if (labelAddressProcessed.has(div)) continue;
+    const text = (div.textContent || '').trim();
+    const match = text.match(/^0x[a-fA-F0-9]{40}$/i);
+    if (!match) continue;
+
+    labelAddressProcessed.add(div);
+    const address = normalizeAddress(match[0]);
+
+    div.setAttribute('data-wt-hover', 'true');
+    div.addEventListener('mouseenter', (e) => {
+      suppressArkhamPopups = true;
+      document.body.classList.add('wt-suppress-popups');
+      showControlPanel(e as MouseEvent, address);
+    });
+    div.addEventListener('mouseleave', () => {
+      hideControlPanelDelayed();
+    });
+
+    const tagData = tagCache.get(address);
+    if (tagData) {
+      div.setAttribute('data-wt-tagged', 'true');
     }
   }
 }
