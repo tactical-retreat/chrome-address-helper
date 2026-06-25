@@ -1240,10 +1240,11 @@ async function importArkhamLabels() {
 // Reverse-engineered from the arkm.com bundle's constructHeaders/sign routine:
 //   inner   = sha256(`${pathname}:${timestamp}:${CLIENT_KEY}`)
 //   payload = sha256(`${CLIENT_KEY}:${inner}`)
-// CLIENT_KEY is NEXT_PUBLIC_WEBAPP_CLIENT_KEY baked into the bundle. If Arkham
-// rotates it (or the scheme changes), re-extract from the signing function in
-// https://arkm.com/_next/static/chunks/*.js (search for "X-Payload").
-const ARKHAM_CLIENT_KEY = 'gh67j345kl6hj5k432';
+// CLIENT_KEY is NEXT_PUBLIC_WEBAPP_CLIENT_KEY, inlined as a string literal into
+// Arkham's Next.js bundle. We scan the page's loaded chunks for it at runtime
+// (resolveArkhamClientKey) so we survive key rotation; this constant is only the
+// fallback used if the scan finds nothing.
+const ARKHAM_CLIENT_KEY_FALLBACK = 'gh67j345kl6hj5k432';
 
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
@@ -1252,11 +1253,47 @@ async function sha256Hex(input: string): Promise<string> {
     .join('');
 }
 
+let arkhamClientKeyCache: string | null = null;
+
+// The import always runs with the arkm.com page open, so its JS chunks are
+// already in the browser cache. The key appears in exactly one of them as
+// NEXT_PUBLIC_WEBAPP_CLIENT_KEY:"<value>" (the zod schema reference nearby uses
+// .string(), not a quoted literal, so the quoted-value regex won't match it).
+async function resolveArkhamClientKey(): Promise<string> {
+  if (arkhamClientKeyCache) return arkhamClientKeyCache;
+
+  // Loaded chunks come from both <script> tags and dynamic imports; the
+  // performance resource timeline captures both.
+  const urls = [
+    ...Array.from(document.querySelectorAll<HTMLScriptElement>('script[src]')).map((s) => s.src),
+    ...performance.getEntriesByType('resource').map((e) => e.name),
+  ].filter((u, i, arr) => u.includes('/_next/static/') && u.endsWith('.js') && arr.indexOf(u) === i);
+
+  const re = /NEXT_PUBLIC_WEBAPP_CLIENT_KEY:\s*"([^"]+)"/;
+  for (const url of urls) {
+    try {
+      const text = await fetch(url).then((r) => (r.ok ? r.text() : ''));
+      const match = text.match(re);
+      if (match) {
+        arkhamClientKeyCache = match[1];
+        console.log('[WalletTagger] Resolved Arkham client key from page bundle');
+        return arkhamClientKeyCache;
+      }
+    } catch {
+      // Unreadable chunk — skip and keep scanning.
+    }
+  }
+
+  console.warn('[WalletTagger] Arkham client key not found in page bundles; using fallback');
+  return ARKHAM_CLIENT_KEY_FALLBACK;
+}
+
 async function arkhamSignedHeaders(url: string): Promise<Record<string, string>> {
+  const clientKey = await resolveArkhamClientKey();
   const pathname = new URL(url).pathname;
   const timestamp = Math.floor(Date.now() / 1000).toString();
-  const inner = await sha256Hex(`${pathname}:${timestamp}:${ARKHAM_CLIENT_KEY}`);
-  const payload = await sha256Hex(`${ARKHAM_CLIENT_KEY}:${inner}`);
+  const inner = await sha256Hex(`${pathname}:${timestamp}:${clientKey}`);
+  const payload = await sha256Hex(`${clientKey}:${inner}`);
   return { 'X-Timestamp': timestamp, 'X-Payload': payload };
 }
 
