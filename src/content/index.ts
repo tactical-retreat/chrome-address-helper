@@ -1235,14 +1235,47 @@ async function importArkhamLabels() {
   }
 }
 
+// Arkham's web app signs every API request with X-Timestamp / X-Payload headers
+// (added when they moved off intel.arkm.com). Unsigned requests get a 403.
+// Reverse-engineered from the arkm.com bundle's constructHeaders/sign routine:
+//   inner   = sha256(`${pathname}:${timestamp}:${CLIENT_KEY}`)
+//   payload = sha256(`${CLIENT_KEY}:${inner}`)
+// CLIENT_KEY is NEXT_PUBLIC_WEBAPP_CLIENT_KEY baked into the bundle. If Arkham
+// rotates it (or the scheme changes), re-extract from the signing function in
+// https://arkm.com/_next/static/chunks/*.js (search for "X-Payload").
+const ARKHAM_CLIENT_KEY = 'gh67j345kl6hj5k432';
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function arkhamSignedHeaders(url: string): Promise<Record<string, string>> {
+  const pathname = new URL(url).pathname;
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const inner = await sha256Hex(`${pathname}:${timestamp}:${ARKHAM_CLIENT_KEY}`);
+  const payload = await sha256Hex(`${ARKHAM_CLIENT_KEY}:${inner}`);
+  return { 'X-Timestamp': timestamp, 'X-Payload': payload };
+}
+
 async function fetchArkhamLabels(): Promise<Tag[]> {
   // Use a map to dedupe by address, preferring labels over entity-only entries
   const tagMap = new Map<string, Tag>();
 
   // Fetch entities first (so labels can override)
-  const entitiesResponse = await fetch('https://api.arkm.com/user/entities', {
+  const entitiesUrl = 'https://api.arkm.com/user/entities';
+  const entitiesResponse = await fetch(entitiesUrl, {
     credentials: 'include',
+    headers: await arkhamSignedHeaders(entitiesUrl),
   });
+
+  if (!entitiesResponse.ok) {
+    console.warn(
+      `[WalletTagger] /user/entities returned ${entitiesResponse.status} ${entitiesResponse.statusText}`,
+    );
+  }
 
   if (entitiesResponse.ok) {
     const entitiesData = await entitiesResponse.json();
@@ -1264,9 +1297,17 @@ async function fetchArkhamLabels(): Promise<Tag[]> {
   }
 
   // Fetch individual labels (these override/augment entity entries)
-  const labelsResponse = await fetch('https://api.arkm.com/user/labels', {
+  const labelsUrl = 'https://api.arkm.com/user/labels';
+  const labelsResponse = await fetch(labelsUrl, {
     credentials: 'include',
+    headers: await arkhamSignedHeaders(labelsUrl),
   });
+
+  if (!labelsResponse.ok) {
+    console.warn(
+      `[WalletTagger] /user/labels returned ${labelsResponse.status} ${labelsResponse.statusText}`,
+    );
+  }
 
   if (labelsResponse.ok) {
     const labelsData = await labelsResponse.json();
@@ -1290,6 +1331,11 @@ async function fetchArkhamLabels(): Promise<Tag[]> {
   const tags = Array.from(tagMap.values());
 
   if (tags.length === 0) {
+    if (!entitiesResponse.ok || !labelsResponse.ok) {
+      throw new Error(
+        `Arkham API auth failed (entities: ${entitiesResponse.status}, labels: ${labelsResponse.status}). Are you logged in to arkm.com?`,
+      );
+    }
     throw new Error('No labels or entities found');
   }
 
