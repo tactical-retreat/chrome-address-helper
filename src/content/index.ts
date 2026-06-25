@@ -11,6 +11,12 @@ let knownAddresses: string[] = [];
 let tagCache: Map<string, { name: string; entity?: string }> = new Map();
 let enabled = true;
 
+// Arkham migrated its app from intel.arkm.com to arkm.com (the old host now
+// 302-redirects to the new one). Match both so the integration keeps working.
+function isArkhamHost(hostname: string = window.location.hostname): boolean {
+  return hostname === 'arkm.com' || hostname === 'intel.arkm.com';
+}
+
 /**
  * Format tag display name with entity/name/address logic
  * Priority: 'Entity: Name' > 'Entity: (0xabc...)' > 'Name'
@@ -67,7 +73,7 @@ async function initialize() {
 
     // Skip generic text node scanning on React-managed sites
     // to avoid DOM conflicts that crash the page
-    const isReactSite = window.location.hostname === 'intel.arkm.com';
+    const isReactSite = isArkhamHost();
     if (!isReactSite) {
       scanPage();
       observeDOM();
@@ -659,7 +665,7 @@ let scanDebounce: number;
 function handleSpecialPages() {
   const hostname = window.location.hostname;
 
-  if (hostname === 'intel.arkm.com') {
+  if (isArkhamHost(hostname)) {
     // Add hover controls to Arkham's existing address elements
     setTimeout(handleArkhamAddresses, 1000);
 
@@ -1550,7 +1556,7 @@ chrome.runtime.onMessage.addListener((message) => {
         tagCache = new Map(Object.entries(response.tags));
         knownAddresses = Array.from(tagCache.keys());
 
-        const isArkham = window.location.hostname === 'intel.arkm.com';
+        const isArkham = isArkhamHost();
 
         if (!isArkham) {
           // Remove existing markers and rescan on non-React sites
